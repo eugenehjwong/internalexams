@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Filter Students by Subject</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f4f4f4; }
+    input, button, select { margin-top: 10px; padding: 8px; font-size: 16px; }
+  </style>
+</head>
+<body>
+
+<h2>🎯 Filter Students by Subject</h2>
+
+<input type="file" id="fileInput" accept=".csv, .xlsx" />
+<br>
+<label for="subjectInput">Enter Subject Abbreviation (e.g. EL, BIO):</label>
+<input type="text" id="subjectInput" placeholder="Enter subject abbreviation" />
+<br>
+<button onclick="filterStudents()">🔍 Filter Students</button>
+
+<div id="output"></div>
+
+<script>
+  let studentsData = [];
+
+  document.getElementById('fileInput').addEventListener('change', handleFile, false);
+
+  function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    if (file.name.endsWith('.csv')) {
+      reader.onload = function(e) {
+        const result = Papa.parse(e.target.result, { header: false });
+        studentsData = result.data.filter(row => row.length > 0);
+        alert("CSV file loaded successfully.");
+      };
+      reader.readAsText(file);
+    } else if (file.name.endsWith('.xlsx')) {
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        studentsData = json.filter(row => row.length > 0);
+        alert("Excel file loaded successfully.");
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      alert("Please upload a CSV or XLSX file.");
+    }
+  }
+
+  function filterStudents() {
+    const subjectAbbr = document.getElementById('subjectInput').value.trim().toUpperCase();
+    if (!subjectAbbr) {
+      alert("Please enter a subject abbreviation.");
+      return;
+    }
+
+    if (studentsData.length === 0) {
+      alert("Please upload a spreadsheet first.");
+      return;
+    }
+
+    const results = [];
+
+    for (let i = 1; i < studentsData.length; i++) { // Skip header
+      const row = studentsData[i];
+      const regNo = row[0];
+      const name = row[1];
+      const className = row[2];
+
+      const subjects = row.slice(3);
+      const offersSubject = subjects.some(cell => (cell || "").toUpperCase().startsWith(subjectAbbr + " -"));
+
+      if (offersSubject) {
+        results.push([regNo, name, className]);
+      }
+    }
+
+    if (results.length === 0) {
+      document.getElementById('output').innerHTML = `<p>No students found offering subject: <strong>${subjectAbbr}</strong></p>`;
+      return;
+    }
+
+    let html = `<h3>Students Offering: ${subjectAbbr}</h3>`;
+    html += "<table><thead><tr><th>Register No.</th><th>Name</th><th>Class</th></tr></thead><tbody>";
+    results.forEach(row => {
+      html += `<tr><td>${row[0]}</td><td>${row[1]}</td><td>${row[2]}</td></tr>`;
+    });
+    html += "</tbody></table>";
+
+    document.getElementById('output').innerHTML = html;
+  }
+</script>
+
+</body>
+</html>
