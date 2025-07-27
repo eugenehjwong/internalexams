@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Student Subject Filter</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
@@ -89,7 +89,7 @@
       });
 
       const levelSelect = document.getElementById("levelSelect");
-      levelSelect.innerHTML = "<option value="all">All</option>";
+      levelSelect.innerHTML = "<option value='all'>All</option>";
       [...levels].sort().forEach(level => {
         levelSelect.innerHTML += `<option value="${level}">${level}</option>`;
       });
