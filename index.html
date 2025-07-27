@@ -1,218 +1,164 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Subject Filter Web App</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Subject Filter</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    table, th, td { border: 1px solid black; border-collapse: collapse; padding: 5px; }
-    table { margin-top: 20px; width: 100%; }
-    .checkbox-list { margin-bottom: 20px; }
-    .copy-btn { margin-top: 10px; }
-    .stats-table { margin-top: 20px; border: 1px solid #000; }
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    .subject-list, .level-filter { margin: 10px 0; }
+    .result-table, .summary-table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    .result-table th, .result-table td, .summary-table th, .summary-table td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    .result-table th, .summary-table th { background-color: #f2f2f2; }
+    .btn { margin: 10px 5px; padding: 10px; cursor: pointer; }
+    .index-output { white-space: pre; border: 1px solid #ccc; padding: 10px; margin-top: 10px; max-height: 200px; overflow-y: auto; }
   </style>
 </head>
 <body>
-  <h1>Filter Students by Subject</h1>
-  <input type="file" id="fileInput" accept=".xlsx, .xls" />
-  <div id="checkboxContainer" class="checkbox-list"></div>
-  <button onclick="filterStudents()">Filter Students</button>
-  
-  <h2>Filtered Students</h2>
-  <table id="studentTable"></table>
-
-  <h2>Exam Index Numbers</h2>
-  <textarea id="indexList" rows="10" style="width: 100%;"></textarea>
-  <br>
-  <button onclick="copyIndexList()" class="copy-btn">Copy Index List</button>
-  <button onclick="exportToCSV()">Export Filtered List to CSV</button>
-
-  <h2>Group Statistics</h2>
-  <table id="groupStats" class="stats-table"></table>
+  <h2>Student Subject Filter</h2>
+  <input type="file" id="fileInput" accept=".xlsx" />
+  <div class="level-filter">
+    <label for="levelSelect">Select Level:</label>
+    <select id="levelSelect"></select>
+  </div>
+  <div class="subject-list" id="subjectList"></div>
+  <button class="btn" onclick="filterStudents()">Filter Students</button>
+  <div id="results"></div>
+  <h3>Exam Index List</h3>
+  <div class="index-output" id="indexList"></div>
+  <button class="btn" onclick="copyIndexList()">Copy Index List</button>
+  <button class="btn" onclick="exportCSV()">Export Filtered Results CSV</button>
 
   <script>
-    let studentData = [];
-    let headers = [];
-    let civicsGroupIndex;
-    let subjectColumns = [];
+    let workbook, students = [], subjectCols = [], civicsIndex = -1;
 
-    const classCodeMap = {
-      "TEMPERANCE": "TP", "GENTLENESS": "GT", "FAITHFULNESS": "FN", "GOODNESS": "GD",
-      "KINDNESS": "KD", "PATIENCE": "PT", "PEACE": "PC", "JOY": "JY",
-      "LOVE": "LV", "DEVOTION": "DV"
+    const classCodes = {
+      'TEMPERANCE': 'TP', 'GENTLENESS': 'GT', 'FAITHFULNESS': 'FN', 'GOODNESS': 'GD',
+      'KINDNESS': 'KD', 'PATIENCE': 'PT', 'PEACE': 'PC', 'JOY': 'JY', 'LOVE': 'LV', 'DEVOTION': 'DV'
     };
 
-    document.getElementById("fileInput").addEventListener("change", function (e) {
+    document.getElementById('fileInput').addEventListener('change', handleFile);
+
+    function handleFile(e) {
       const reader = new FileReader();
       reader.onload = function (e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const allData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-        const headerRowIndex = allData.findIndex(row => row[0] === "S/N" && row[1] === "Name");
-        headers = allData[headerRowIndex];
-        studentData = allData.slice(headerRowIndex + 1);
-
-        civicsGroupIndex = headers.findIndex(h => h && h.toString().toLowerCase().includes("civics group"));
-        subjectColumns = headers.slice(civicsGroupIndex + 1);
-
-        let subjectSet = new Set();
-        studentData.forEach(row => {
-          row.slice(civicsGroupIndex + 1).forEach(cell => {
-            const subject = (cell || '').toString().trim();
-            if (subject && subject !== '-') subjectSet.add(subject);
-          });
-        });
-
-        renderCheckboxes(Array.from(subjectSet).sort());
+        workbook = XLSX.read(e.target.result, { type: 'binary' });
+        populateSheetAndSubjects();
       };
-      reader.readAsArrayBuffer(e.target.files[0]);
-    });
+      reader.readAsBinaryString(e.target.files[0]);
+    }
 
-    function renderCheckboxes(subjects) {
-      const container = document.getElementById("checkboxContainer");
-      container.innerHTML = "<strong>Select Subjects:</strong><br>";
-      subjects.forEach(subject => {
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.value = subject;
-        checkbox.name = "subjectFilter";
+    function populateSheetAndSubjects() {
+      let allSubjects = new Set();
+      let levels = new Set();
 
-        const label = document.createElement("label");
-        label.textContent = subject;
-        label.style.marginRight = "10px";
+      students = [];
 
-        container.appendChild(checkbox);
-        container.appendChild(label);
-        container.appendChild(document.createElement("br"));
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+        const headers = json[9]; // Row 10 is the actual header
+        civicsIndex = headers.indexOf("Civics Group");
+        const levelIndex = headers.indexOf("Level");
+
+        if (civicsIndex === -1 || levelIndex === -1) return;
+
+        subjectCols = headers.slice(civicsIndex + 1).map((_, i) => civicsIndex + 1 + i);
+
+        for (let i = 10; i < json.length; i++) {
+          const row = json[i];
+          const subjectEntries = subjectCols.map(index => row[index] || '').map(s => s.toString().trim()).filter(s => s && s !== '-');
+          subjectEntries.forEach(s => allSubjects.add(s));
+          if (row.length > 0) levels.add(row[levelIndex]);
+          students.push({
+            sn: row[0],
+            name: row[1],
+            level: row[levelIndex],
+            civics: row[civicsIndex],
+            subjects: subjectEntries
+          });
+        }
+      });
+
+      const subjectList = document.getElementById("subjectList");
+      subjectList.innerHTML = "<strong>Select Subjects:</strong><br>";
+      [...allSubjects].sort().forEach(sub => {
+        subjectList.innerHTML += `<label><input type="checkbox" value="${sub}" /> ${sub}</label><br>`;
+      });
+
+      const levelSelect = document.getElementById("levelSelect");
+      levelSelect.innerHTML = "<option value="all">All</option>";
+      [...levels].sort().forEach(level => {
+        levelSelect.innerHTML += `<option value="${level}">${level}</option>`;
       });
     }
 
-    function generateExamIndex(civics, sn) {
-      let prefix = "";
-      for (const [key, val] of Object.entries(classCodeMap)) {
-        if (civics.toUpperCase().includes(key)) {
-          prefix = val;
-          break;
-        }
-      }
-      const num = String(sn).padStart(2, '0');
-      return prefix + num;
+    function generateIndex(civics, sn) {
+      const code = Object.entries(classCodes).find(([k]) => civics.toUpperCase().includes(k))?.[1] || "XX";
+      return code + ("0" + sn).slice(-2);
     }
 
     function filterStudents() {
-      const selectedSubjects = Array.from(document.querySelectorAll('input[name="subjectFilter"]:checked')).map(cb => cb.value);
-      if (selectedSubjects.length === 0) return;
+      const selectedSubjects = Array.from(document.querySelectorAll("input[type='checkbox']:checked")).map(cb => cb.value);
+      const selectedLevel = document.getElementById("levelSelect").value;
 
-      const filtered = [];
-      const indexSet = new Set();
-      const groupCount = {};
-      const indexList = [];
+      const filtered = students.filter(s =>
+        (selectedLevel === "all" || s.level === selectedLevel) &&
+        selectedSubjects.some(sub => s.subjects.includes(sub))
+      );
 
-      studentData.forEach(row => {
-        const sn = row[0];
-        const name = row[1];
-        const civics = row[civicsGroupIndex];
-        const subjects = row.slice(civicsGroupIndex + 1).map(cell => (cell || '').trim());
+      const output = filtered.map((s, i) => ({
+        sn: s.sn,
+        name: s.name,
+        civics: s.civics,
+        index: generateIndex(s.civics, s.sn)
+      }));
 
-        if (selectedSubjects.some(subject => subjects.includes(subject))) {
-          const index = generateExamIndex(civics, sn);
-          if (!indexSet.has(index)) {
-            filtered.push([sn, name, civics, index]);
-            indexList.push(index);
-            indexSet.add(index);
-            groupCount[civics] = (groupCount[civics] || 0) + 1;
-          }
-        }
-      });
+      // Group counts
+      const summary = {};
+      output.forEach(s => summary[s.civics] = (summary[s.civics] || 0) + 1);
 
-      renderStudentTable(filtered);
-      renderIndexList(indexList);
-      renderStatsTable(groupCount);
-    }
+      const resultDiv = document.getElementById("results");
+      resultDiv.innerHTML = `
+        <h3>Filtered Students</h3>
+        <table class="result-table">
+          <tr><th>S/N</th><th>Name</th><th>Civics Group</th><th>Exam Index</th></tr>
+          ${output.map(s => `<tr><td>${s.sn}</td><td>${s.name}</td><td>${s.civics}</td><td>${s.index}</td></tr>`).join('')}
+        </table>
 
-    function renderStudentTable(data) {
-      const table = document.getElementById("studentTable");
-      table.innerHTML = "";
-      const header = ["S/N", "Name", "Civics Group", "Exam Index No."];
-      const thead = document.createElement("thead");
-      const headRow = document.createElement("tr");
-      header.forEach(text => {
-        const th = document.createElement("th");
-        th.textContent = text;
-        headRow.appendChild(th);
-      });
-      thead.appendChild(headRow);
-      table.appendChild(thead);
+        <h3>Summary by Civics Group</h3>
+        <table class="summary-table">
+          <tr><th>Civics Group</th><th>Count</th></tr>
+          ${Object.entries(summary).map(([grp, count]) => `<tr><td>${grp}</td><td>${count}</td></tr>`).join('')}
+          <tr><th>Total</th><th>${output.length}</th></tr>
+        </table>
+      `;
 
-      const tbody = document.createElement("tbody");
-      data.forEach(row => {
-        const tr = document.createElement("tr");
-        row.forEach(cell => {
-          const td = document.createElement("td");
-          td.textContent = cell;
-          tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-    }
-
-    function renderIndexList(list) {
-      document.getElementById("indexList").value = list.join("\n");
+      document.getElementById("indexList").textContent = output.map(s => s.index).join("\n");
     }
 
     function copyIndexList() {
-      const textarea = document.getElementById("indexList");
-      textarea.select();
-      document.execCommand("copy");
+      const el = document.getElementById("indexList");
+      navigator.clipboard.writeText(el.textContent);
+      alert("Index list copied to clipboard!");
     }
 
-    function renderStatsTable(stats) {
-      const table = document.getElementById("groupStats");
-      table.innerHTML = "";
-      let total = 0;
-
-      const thead = document.createElement("thead");
-      const headRow = document.createElement("tr");
-      ["Civics Group", "No. of Students"].forEach(h => {
-        const th = document.createElement("th");
-        th.textContent = h;
-        headRow.appendChild(th);
+    function exportCSV() {
+      const rows = [["S/N", "Name", "Civics Group", "Exam Index"]];
+      const data = document.querySelectorAll(".result-table tr");
+      data.forEach((row, i) => {
+        if (i === 0) return; // skip header
+        const cols = Array.from(row.querySelectorAll("td")).map(td => td.textContent);
+        rows.push(cols);
       });
-      thead.appendChild(headRow);
-      table.appendChild(thead);
-
-      const tbody = document.createElement("tbody");
-      Object.entries(stats).forEach(([group, count]) => {
-        total += count;
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${group}</td><td>${count}</td>`;
-        tbody.appendChild(tr);
-      });
-      const totalRow = document.createElement("tr");
-      totalRow.innerHTML = `<td><strong>Total</strong></td><td><strong>${total}</strong></td>`;
-      tbody.appendChild(totalRow);
-      table.appendChild(tbody);
-    }
-
-    function exportToCSV() {
-      const table = document.getElementById("studentTable");
-      if (!table.rows.length) return;
-
-      let csv = [];
-      for (let row of table.rows) {
-        let cols = Array.from(row.cells).map(cell => `"${cell.innerText}"`).join(",");
-        csv.push(cols);
-      }
-
-      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const csvContent = "data:text/csv;charset=utf-8," + rows.map(r => r.join(",")).join("\n");
+      const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "filtered_students.csv";
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "filtered_students.csv");
+      document.body.appendChild(link);
       link.click();
     }
   </script>
