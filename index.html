@@ -4,175 +4,195 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Student Subject Filter</title>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
+    body { font-family: Arial, sans-serif; margin: 20px; }
     h2 { margin-top: 30px; }
-    .subject-checkboxes { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
-    .subject-checkboxes label { margin-right: 15px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    textarea { width: 100%; height: 150px; margin-top: 10px; }
-    button { margin-right: 10px; margin-top: 10px; }
+    table, th, td { border: 1px solid #ccc; border-collapse: collapse; padding: 8px; }
+    table { width: 100%; margin-top: 10px; }
+    .checkbox-container { display: flex; flex-wrap: wrap; gap: 10px; }
+    .checkbox-container label { white-space: nowrap; }
+    #copyButton { margin-top: 10px; }
   </style>
 </head>
 <body>
   <h1>Student Subject Filter</h1>
-  <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" />
-  <div id="checkboxContainer"></div>
+  <input type="file" id="upload" accept=".xlsx, .xls, .csv" /><br><br>
+  <div id="subject-selection"></div>
   <button onclick="filterStudents()">Filter Students</button>
+
   <h2>Filtered Students</h2>
-  <div id="subjectHeader"></div>
-  <table id="outputTable">
-    <thead>
-      <tr><th>Name</th><th>Civics Group</th><th>Exam Index Number</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div id="filtered-students"></div>
+
   <h2>Exam Index Numbers</h2>
-  <textarea id="examIndexList" readonly></textarea><br />
-  <button onclick="copyToClipboard()">Copy Index List</button>
-  <button onclick="downloadCSV()">Export Filtered CSV</button>
-  <button onclick="downloadIndexCSV()">Export Index List CSV</button>
+  <textarea id="examIndexes" rows="10" style="width: 100%;"></textarea><br>
+  <button onclick="copyIndexes()" id="copyButton">Copy to Clipboard</button>
+  <button onclick="exportCSV()">Export Filtered List to CSV</button>
+  <button onclick="exportIndexList()">Export Index Numbers to CSV</button>
 
-  <script>
-    let workbookData = [];
-    let headers = [];
+  <h2>Summary by Civics Group</h2>
+  <div id="summary"></div>
 
-    const classPrefixes = {
-      TEMPERANCE: 'TP', GENTLENESS: 'GT', FAITHFULNESS: 'FN', GOODNESS: 'GD',
-      KINDNESS: 'KD', PATIENCE: 'PT', PEACE: 'PC', JOY: 'JY', LOVE: 'LV', DEVOTION: 'DV'
-    };
+<script>
+let studentData = [];
+let subjectSet = new Set();
 
-    document.getElementById('fileInput').addEventListener('change', (e) => {
-      const reader = new FileReader();
-      const file = e.target.files[0];
-      reader.onload = (evt) => {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const allData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+const CLASS_CODES = {
+  "TEMPERANCE": "TP",
+  "GENTLENESS": "GT",
+  "FAITHFULNESS": "FN",
+  "GOODNESS": "GD",
+  "KINDNESS": "KD",
+  "PATIENCE": "PT",
+  "PEACE": "PC",
+  "JOY": "JY",
+  "LOVE": "LV",
+  "DEVOTION": "DV"
+};
 
-        // Find the row where headers begin
-        const headerRowIndex = allData.findIndex(row =>
-          row[0]?.toString().trim().toUpperCase() === 'S/N' &&
-          row[1]?.toString().trim().toUpperCase() === 'NAME'
-        );
+function parseExcel(file) {
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    const data = new Uint8Array(e.target.result);
+    const workbook = XLSX.read(data, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-        if (headerRowIndex === -1) return alert('Header row not found.');
+    const headerRow = jsonData.find(row => row[0] === "S/N" && row[1] === "Name");
+    const startIndex = jsonData.indexOf(headerRow);
+    const headers = jsonData[startIndex];
+    const dataRows = jsonData.slice(startIndex + 1);
 
-        headers = allData[headerRowIndex];
-        workbookData = allData.slice(headerRowIndex + 1);
-
-        generateSubjectCheckboxes();
-      };
-      reader.readAsArrayBuffer(file);
+    studentData = dataRows.map(row => {
+      const student = {};
+      headers.forEach((header, i) => {
+        student[header] = row[i];
+      });
+      return student;
     });
 
-    function generateSubjectCheckboxes() {
-      const checkboxContainer = document.getElementById('checkboxContainer');
-      checkboxContainer.innerHTML = '<h3>Select Subjects</h3><div class="subject-checkboxes"></div>';
-      const subjectSet = new Set();
-
-      const subjectStartIndex = headers.findIndex(h => h?.toString().toLowerCase().includes('civics group')) + 1;
-
-      for (const row of workbookData) {
-        for (let i = subjectStartIndex; i < row.length; i++) {
-          const val = row[i]?.toString().trim();
-          if (val && val !== '-') subjectSet.add(val);
+    studentData.forEach(student => {
+      headers.slice(6).forEach(h => {
+        const val = student[h];
+        if (val && val !== "-" && typeof val === "string") {
+          subjectSet.add(val.trim());
         }
+      });
+    });
+
+    displaySubjects();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function displaySubjects() {
+  const container = document.getElementById("subject-selection");
+  container.innerHTML = "<h2>Select Subject(s)</h2>";
+  const checkboxContainer = document.createElement("div");
+  checkboxContainer.className = "checkbox-container";
+  Array.from(subjectSet).sort().forEach(subject => {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = subject;
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(subject));
+    checkboxContainer.appendChild(label);
+  });
+  container.appendChild(checkboxContainer);
+}
+
+function generateExamIndex(civicsGroup, sn) {
+  const classKey = Object.keys(CLASS_CODES).find(k => civicsGroup.toUpperCase().includes(k));
+  const prefix = classKey ? CLASS_CODES[classKey] : "XX";
+  const number = String(sn).padStart(2, '0');
+  return prefix + number;
+}
+
+function filterStudents() {
+  const checkboxes = document.querySelectorAll("#subject-selection input[type=checkbox]:checked");
+  const selectedSubjects = Array.from(checkboxes).map(cb => cb.value.trim());
+  const results = [];
+  const seenIndexes = new Set();
+  const civicsCounts = {};
+
+  studentData.forEach(student => {
+    const sn = student["S/N"];
+    const name = student["Name"];
+    const group = student["Civics Group"];
+    const subjects = Object.values(student).slice(6).filter(val => val && val !== "-");
+
+    const match = subjects.some(sub => selectedSubjects.includes(sub.trim()));
+    if (match) {
+      const index = generateExamIndex(group, sn);
+      if (!seenIndexes.has(index)) {
+        results.push({ sn, name, group, index });
+        seenIndexes.add(index);
+        civicsCounts[group] = (civicsCounts[group] || 0) + 1;
       }
-
-      const boxWrapper = checkboxContainer.querySelector('.subject-checkboxes');
-      subjectSet.forEach(subject => {
-        const label = document.createElement('label');
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = subject;
-        label.appendChild(checkbox);
-        label.append(` ${subject}`);
-        boxWrapper.appendChild(label);
-      });
     }
+  });
 
-    function getClassCode(civicsGroup) {
-      const key = Object.keys(classPrefixes).find(k => civicsGroup.toUpperCase().includes(k));
-      return classPrefixes[key] || 'XX';
-    }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>S/N</th><th>Name</th><th>Civics Group</th><th>Exam Index No.</th></tr>";
+  const tbody = document.createElement("tbody");
+  results.forEach(row => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${row.sn}</td><td>${row.name}</td><td>${row.group}</td><td>${row.index}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  document.getElementById("filtered-students").innerHTML = "";
+  document.getElementById("filtered-students").appendChild(table);
 
-    function filterStudents() {
-      const selectedSubjects = Array.from(document.querySelectorAll('.subject-checkboxes input:checked')).map(cb => cb.value.trim());
-      if (selectedSubjects.length === 0) return alert('Please select at least one subject.');
+  // Output index numbers to text area
+  document.getElementById("examIndexes").value = results.map(r => r.index).join("\n");
 
-      const subjectStartIndex = headers.findIndex(h => h?.toString().toLowerCase().includes('civics group')) + 1;
+  // Summary
+  const summaryTable = document.createElement("table");
+  summaryTable.innerHTML = "<tr><th>Civics Group</th><th>Number of Students</th></tr>" +
+    Object.entries(civicsCounts).map(([group, count]) => `<tr><td>${group}</td><td>${count}</td></tr>`).join("");
+  const totalRow = `<tr><td><strong>Total</strong></td><td><strong>${results.length}</strong></td></tr>`;
+  summaryTable.innerHTML += totalRow;
+  document.getElementById("summary").innerHTML = "";
+  document.getElementById("summary").appendChild(summaryTable);
+}
 
-      const tableBody = document.querySelector('#outputTable tbody');
-      tableBody.innerHTML = '';
-      const indexList = [];
+function copyIndexes() {
+  const textarea = document.getElementById("examIndexes");
+  textarea.select();
+  document.execCommand("copy");
+}
 
-      workbookData.forEach(row => {
-        const name = row[1];
-        const civics = row[5];
-        const sn = parseInt(row[0]);
-        if (!name || !civics || isNaN(sn)) return;
+function exportCSV() {
+  const rows = [["S/N", "Name", "Civics Group", "Exam Index No."]];
+  document.querySelectorAll("#filtered-students tbody tr").forEach(tr => {
+    const cells = Array.from(tr.children).map(td => td.textContent);
+    rows.push(cells);
+  });
+  downloadCSV(rows, "filtered_students.csv");
+}
 
-        const subjects = row.slice(subjectStartIndex).filter(val => val && val !== '-').map(s => s.trim());
-        const match = subjects.some(s => selectedSubjects.includes(s));
+function exportIndexList() {
+  const lines = document.getElementById("examIndexes").value.split("\n").map(i => [i]);
+  downloadCSV([["Exam Index No."]].concat(lines), "exam_index_list.csv");
+}
 
-        if (match) {
-          const code = getClassCode(civics);
-          const index = `${code}${sn.toString().padStart(2, '0')}`;
-          const tr = document.createElement('tr');
-          [name, civics, index].forEach(text => {
-            const td = document.createElement('td');
-            td.textContent = text;
-            tr.appendChild(td);
-          });
-          tableBody.appendChild(tr);
-          indexList.push(index);
-        }
-      });
+function downloadCSV(data, filename) {
+  const csv = data.map(row => row.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 
-      document.getElementById('examIndexList').value = indexList.join('\n');
-      document.getElementById('subjectHeader').innerHTML = `<h3>Selected Subject(s): ${selectedSubjects.join(', ')}</h3>`;
-    }
-
-    function copyToClipboard() {
-      const textarea = document.getElementById('examIndexList');
-      textarea.select();
-      document.execCommand('copy');
-      alert('Copied to clipboard');
-    }
-
-    function downloadCSV() {
-      const rows = [['Name', 'Civics Group', 'Exam Index Number']];
-      document.querySelectorAll('#outputTable tbody tr').forEach(tr => {
-        const row = Array.from(tr.children).map(td => td.textContent);
-        rows.push(row);
-      });
-      const csv = rows.map(r => r.join(',')).join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'filtered_students.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
-    function downloadIndexCSV() {
-      const list = document.getElementById('examIndexList').value.trim().split('\n').filter(Boolean);
-      const rows = [['Exam Index Number'], ...list.map(i => [i])];
-      const csv = rows.map(r => r.join(',')).join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'exam_index_numbers.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-  </script>
+// Event Listener
+upload.addEventListener("change", e => parseExcel(e.target.files[0]));
+</script>
 </body>
 </html>
