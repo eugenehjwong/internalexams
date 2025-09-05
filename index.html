@@ -2,186 +2,90 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Student Subject Filter App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Subject Filter</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    h2 { margin-top: 30px; }
-    .btn { margin: 5px; padding: 6px 12px; border: none; background: #007bff; color: white; cursor: pointer; border-radius: 5px; }
-    .btn:hover { background: #0056b3; }
-    table { border-collapse: collapse; width: 100%; margin-top: 15px; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    th { background-color: #f2f2f2; }
-    .checkbox-list { margin: 10px 0; display: flex; flex-wrap: wrap; }
-    .checkbox-list label { margin-right: 15px; }
-    textarea { width: 100%; height: 120px; margin-top: 10px; }
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    .subject-list, .level-filter { margin: 10px 0; }
+    .result-table, .summary-table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    .result-table th, .result-table td, .summary-table th, .summary-table td {
+      border: 1px solid #ccc; padding: 8px; text-align: left;
+    }
+    .result-table th, .summary-table th { background-color: #f2f2f2; }
+    .btn { margin: 10px 5px; padding: 10px; cursor: pointer; }
+    .index-output { white-space: pre; border: 1px solid #ccc; padding: 10px; margin-top: 10px;
+      max-height: 200px; overflow-y: auto; }
   </style>
 </head>
 <body>
-
-  <h2>Upload Student List</h2>
-  <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
-
-  <h2>Select Subject(s)</h2>
-  <div id="subjectList" class="checkbox-list"></div>
+  <h2>Student Subject Filter</h2>
+  <input type="file" id="fileInput" accept=".xlsx" />
+  <div class="level-filter">
+    <label for="levelSelect">Select Level:</label>
+    <select id="levelSelect"></select>
+  </div>
+  <div class="subject-list" id="subjectList"></div>
   <button class="btn" onclick="filterStudents()">Filter Students</button>
-  <button class="btn" onclick="exportCSV()">Export Filtered Results CSV</button>
-  <button class="btn" onclick="exportIndexCSV()">Export Index List CSV</button>
-  <button class="btn" onclick="copyExamIndex()">Copy Index List</button>
-
-  <h2>Filtered Results</h2>
   <div id="results"></div>
-  <h3>Exam Index Numbers</h3>
-  <textarea id="examIndexList" readonly></textarea>
 
-  <h2>Check Student's Subjects</h2>
+  <h3>Exam Index List</h3>
+  <div class="index-output" id="indexList"></div>
+  <button class="btn" onclick="copyIndexList()">Copy Index List</button>
+  <button class="btn" onclick="exportCSV()">Export Filtered Results CSV</button>
+  <button class="btn" onclick="exportExcel()">Export Filtered Results Excel</button>
+
+  <h3>Check Student's Subjects</h3>
   <input type="text" id="examIndexInput" placeholder="Enter Exam Index (e.g., GD23)" />
   <button class="btn" onclick="checkStudentSubjects()">Check Subjects</button>
   <div id="studentSubjects"></div>
 
   <script>
-    let students = [];
-    let allSubjects = [];
+    let workbook, students = [], subjectCols = [], civicsIndex = -1;
 
-    const classMap = {
-      "TEMPERANCE": "TP", "GENTLENESS": "GT", "FAITHFULNESS": "FN",
-      "GOODNESS": "GD", "KINDNESS": "KD", "PATIENCE": "PT",
-      "PEACE": "PC", "JOY": "JY", "LOVE": "LV", "DEVOTION": "DV"
+    const classCodes = {
+      'TEMPERANCE': 'TP', 'GENTLENESS': 'GT', 'FAITHFULNESS': 'FN',
+      'GOODNESS': 'GD', 'KINDNESS': 'KD', 'PATIENCE': 'PT',
+      'PEACE': 'PC', 'JOY': 'JY', 'LOVE': 'LV', 'DEVOTION': 'DV'
     };
 
-    // Handle file upload
     document.getElementById('fileInput').addEventListener('change', handleFile);
 
-    function handleFile(event) {
-      const file = event.target.files[0];
+    function handleFile(e) {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-        
-        const headers = json[9]; // row 10 contains headers
-        const dataRows = json.slice(10);
-
-        const civicsIndex = headers.indexOf("Civics Group");
-
-        students = dataRows.filter(row => row.length > civicsIndex).map(row => {
-          const sn = row[0];
-          const name = row[1];
-          const civics = row[civicsIndex];
-          const subjects = row.slice(civicsIndex + 1).filter(cell => cell && cell !== "-");
-          return { sn, name, civics, subjects };
-        });
-
-        // Get all subjects
-        const subjectSet = new Set();
-        students.forEach(s => s.subjects.forEach(sub => subjectSet.add(sub)));
-        allSubjects = Array.from(subjectSet);
-
-        // Populate checkboxes
-        const subjectListDiv = document.getElementById("subjectList");
-        subjectListDiv.innerHTML = "";
-        allSubjects.forEach(sub => {
-          const label = document.createElement("label");
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.value = sub;
-          label.appendChild(checkbox);
-          label.appendChild(document.createTextNode(sub));
-          subjectListDiv.appendChild(label);
-        });
+      reader.onload = function (e) {
+        workbook = XLSX.read(e.target.result, { type: 'binary' });
+        populateSheetAndSubjects();
       };
-      reader.readAsArrayBuffer(file);
+      reader.readAsBinaryString(e.target.files[0]);
     }
 
-    // Generate exam index
-    function generateIndex(civics, sn) {
-      const prefix = Object.entries(classMap).find(([key]) => civics.toUpperCase().includes(key));
-      const code = prefix ? prefix[1] : "XX";
-      return code + String(sn).padStart(2, '0');
-    }
+    function populateSheetAndSubjects() {
+      let allSubjects = new Set();
+      let levels = new Set();
 
-    // Filter students
-    function filterStudents() {
-      const selectedSubjects = Array.from(document.querySelectorAll("#subjectList input[type='checkbox']:checked")).map(cb => cb.value);
-      if (selectedSubjects.length === 0) {
-        alert("Please select at least one subject.");
-        return;
-      }
+      students = [];
 
-      const filtered = students.filter(s => selectedSubjects.some(sub => s.subjects.includes(sub)));
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-      // Group counts
-      const groupCounts = {};
-      filtered.forEach(s => {
-        groupCounts[s.civics] = (groupCounts[s.civics] || 0) + 1;
-      });
+        const headers = json[9]; // Row 10 is the actual header
+        civicsIndex = headers.indexOf("Civics Group");
+        const levelIndex = headers.indexOf("Level");
 
-      // Create table
-      let table = "<table><tr><th>S/N</th><th>Name</th><th>Civics Group</th><th>Exam Index</th></tr>";
-      filtered.forEach(s => {
-        table += `<tr><td>${s.sn}</td><td>${s.name}</td><td>${s.civics}</td><td>${generateIndex(s.civics, s.sn)}</td></tr>`;
-      });
-      table += "</table>";
+        if (civicsIndex === -1 || levelIndex === -1) return;
 
-      // Group counts table
-      table += "<h3>Civics Group Counts</h3><table><tr><th>Civics Group</th><th>Count</th></tr>";
-      Object.entries(groupCounts).forEach(([group, count]) => {
-        table += `<tr><td>${group}</td><td>${count}</td></tr>`;
-      });
-      table += `<tr><th>Total</th><th>${filtered.length}</th></tr></table>`;
+        // Only valid subject headers (skip "-" and blanks)
+        subjectCols = headers
+          .map((h, i) => ({ name: h, index: i }))
+          .filter(h => h.index > civicsIndex && h.name && h.name !== "-")
+          .map(h => h.index);
 
-      document.getElementById("results").innerHTML = table;
+        for (let i = 10; i < json.length; i++) {
+          const row = json[i];
+          const subjectEntries = subjectCols.map(index => row[index] || '')
+            .map(s => s.toString().trim())
+            .filter(s => s && s !== '-');
 
-      // Exam index list
-      document.getElementById("examIndexList").value = filtered.map(s => generateIndex(s.civics, s.sn)).join("\n");
-    }
-
-    // Export CSV of filtered results
-    function exportCSV() {
-      const csv = "S/N,Name,Civics Group,Exam Index\n" + 
-        students.map(s => `${s.sn},${s.name},${s.civics},${generateIndex(s.civics, s.sn)}`).join("\n");
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      saveAs(blob, "filtered_results.csv");
-    }
-
-    // Export exam index list CSV
-    function exportIndexCSV() {
-      const csv = document.getElementById("examIndexList").value.split("\n").join("\n");
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      saveAs(blob, "exam_index_list.csv");
-    }
-
-    // Copy exam index list
-    function copyExamIndex() {
-      const textarea = document.getElementById("examIndexList");
-      textarea.select();
-      document.execCommand("copy");
-      alert("Exam index list copied to clipboard!");
-    }
-
-    // Check student's subjects by exam index
-    function checkStudentSubjects() {
-      const examIndex = document.getElementById("examIndexInput").value.trim().toUpperCase();
-      const student = students.find(s => generateIndex(s.civics, s.sn) === examIndex);
-
-      if (!student) {
-        document.getElementById("studentSubjects").innerHTML = `<p style="color:red;">Student with index ${examIndex} not found.</p>`;
-        return;
-      }
-
-      const enrolled = student.subjects;
-      const notTaken = allSubjects.filter(sub => !enrolled.includes(sub));
-
-      document.getElementById("studentSubjects").innerHTML = `
-        <h4>Student: ${student.name} (${examIndex})</h4>
-        <p><strong>Civics Group:</strong> ${student.civics}</p>
-        <p><strong>Enrolled Subjects:</strong><br>${enrolled.length > 0 ? enrolled.join(", ") : "None"}</p>
-        <p><strong>Not Taken:</strong><br>${notTaken.length > 0 ? notTaken.join(", ") : "None"}</p>
-      `;
-    }
-  </script>
-</body>
-</html>
+          subjec
