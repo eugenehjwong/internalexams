@@ -88,4 +88,148 @@
             .map(s => s.toString().trim())
             .filter(s => s && s !== '-');
 
-          subjec
+          subjectEntries.forEach(s => allSubjects.add(s));
+          if (row.length > 0) levels.add(row[levelIndex]);
+          students.push({
+            sn: row[0],
+            name: row[1],
+            level: row[levelIndex],
+            civics: row[civicsIndex],
+            subjects: subjectEntries
+          });
+        }
+      });
+
+      // Populate subject checkboxes
+      const subjectList = document.getElementById("subjectList");
+      subjectList.innerHTML = "<strong>Select Subjects:</strong><br>";
+      [...allSubjects].sort().forEach(sub => {
+        subjectList.innerHTML += `<label><input type="checkbox" value="${sub}" /> ${sub}</label><br>`;
+      });
+
+      // Populate levels
+      const levelSelect = document.getElementById("levelSelect");
+      levelSelect.innerHTML = "<option value='all'>All</option>";
+      [...levels].sort().forEach(level => {
+        levelSelect.innerHTML += `<option value="${level}">${level}</option>`;
+      });
+    }
+
+    function generateIndex(civics, sn) {
+      const code = Object.entries(classCodes).find(([k]) => civics && civics.toUpperCase().includes(k))?.[1] || "XX";
+      return code + ("0" + sn).slice(-2);
+    }
+
+    function filterStudents() {
+      const selectedSubjects = Array.from(document.querySelectorAll("input[type='checkbox']:checked")).map(cb => cb.value);
+      const selectedLevel = document.getElementById("levelSelect").value;
+
+      const filtered = students.filter(s =>
+        (selectedLevel === "all" || s.level === selectedLevel) &&
+        selectedSubjects.some(sub => s.subjects.includes(sub))
+      );
+
+      const output = filtered.map(s => ({
+        sn: s.sn,
+        name: s.name,
+        civics: s.civics,
+        index: generateIndex(s.civics, s.sn)
+      }));
+
+      // Group counts
+      const summary = {};
+      output.forEach(s => summary[s.civics] = (summary[s.civics] || 0) + 1);
+
+      const resultDiv = document.getElementById("results");
+      resultDiv.innerHTML = `
+        <h3>Filtered Students</h3>
+        <table class="result-table">
+          <tr><th>S/N</th><th>Name</th><th>Civics Group</th><th>Exam Index</th></tr>
+          ${output.map(s => `<tr><td>${s.sn}</td><td>${s.name}</td><td>${s.civics}</td><td>${s.index}</td></tr>`).join('')}
+        </table>
+
+        <h3>Summary by Civics Group</h3>
+        <table class="summary-table">
+          <tr><th>Civics Group</th><th>Count</th></tr>
+          ${Object.entries(summary).map(([grp, count]) => `<tr><td>${grp}</td><td>${count}</td></tr>`).join('')}
+          <tr><th>Total</th><th>${output.length}</th></tr>
+        </table>
+      `;
+
+      document.getElementById("indexList").textContent = output.map(s => s.index).join("\n");
+    }
+
+    function copyIndexList() {
+      const el = document.getElementById("indexList");
+      navigator.clipboard.writeText(el.textContent);
+      alert("Index list copied to clipboard!");
+    }
+
+    function exportCSV() {
+      const rows = [["S/N", "Name", "Civics Group", "Exam Index"]];
+      const data = document.querySelectorAll(".result-table tr");
+      data.forEach((row, i) => {
+        if (i === 0) return; // skip header
+        const cols = Array.from(row.querySelectorAll("td")).map(td => td.textContent);
+        rows.push(cols);
+      });
+      const csvContent = "data:text/csv;charset=utf-8," + rows.map(r => r.join(",")).join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "filtered_students.csv");
+      document.body.appendChild(link);
+      link.click();
+    }
+
+    function exportExcel() {
+      const table = document.querySelector(".result-table");
+      if (!table) {
+        alert("No filtered results to export.");
+        return;
+      }
+
+      // Collect rows from result table
+      const rows = [["S/N", "Name", "Civics Group", "Exam Index"]];
+      const trs = table.querySelectorAll("tr");
+      trs.forEach((tr, i) => {
+        if (i === 0) return;
+        const cells = Array.from(tr.querySelectorAll("td")).map(td => td.textContent);
+        rows.push(cells);
+      });
+
+      // Convert to worksheet
+      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Filtered Students");
+
+      // Export as Excel
+      XLSX.writeFile(workbook, "filtered_results.xlsx");
+    }
+
+    function checkStudentSubjects() {
+      const examIndex = document.getElementById("examIndexInput").value.trim().toUpperCase();
+      const student = students.find(s => generateIndex(s.civics, s.sn) === examIndex);
+
+      if (!student) {
+        document.getElementById("studentSubjects").innerHTML =
+          `<p style="color:red;">Student with index ${examIndex} not found.</p>`;
+        return;
+      }
+
+      // Master subject list from checkboxes
+      const allSubjects = Array.from(document.querySelectorAll("#subjectList input[type='checkbox']")).map(cb => cb.value);
+
+      const enrolled = student.subjects;
+      const notTaken = allSubjects.filter(sub => !enrolled.includes(sub));
+
+      document.getElementById("studentSubjects").innerHTML = `
+        <h4>Student: ${student.name} (${examIndex})</h4>
+        <p><strong>Civics Group:</strong> ${student.civics}</p>
+        <p><strong>Enrolled Subjects:</strong><br>${enrolled.length > 0 ? enrolled.join(", ") : "None"}</p>
+        <p><strong>Not Taken:</strong><br>${notTaken.length > 0 ? notTaken.join(", ") : "None"}</p>
+      `;
+    }
+  </script>
+</body>
+</html>
