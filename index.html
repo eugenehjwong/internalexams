@@ -120,21 +120,25 @@
 
       // Sort filtered by civics group order
       filtered.sort((a, b) => {
-        const aIndex = groupOrder.findIndex(g => a.civics.toUpperCase().includes(g));
-        const bIndex = groupOrder.findIndex(g => b.civics.toUpperCase().includes(g));
+        const aIndex = groupOrder.findIndex(g => a.civics?.toUpperCase().includes(g));
+        const bIndex = groupOrder.findIndex(g => b.civics?.toUpperCase().includes(g));
         return aIndex - bIndex;
       });
 
-      const output = filtered.map((s, i) => ({
+      const output = filtered.map(s => ({
         sn: s.sn,
         name: s.name,
         civics: s.civics,
         index: generateIndex(s.civics, s.sn)
       }));
 
-      // Group counts in fixed order
+      // Group counts (ensure all groups included)
       const summary = {};
-      output.forEach(s => summary[s.civics] = (summary[s.civics] || 0) + 1);
+      groupOrder.forEach(g => summary[g] = 0);
+      output.forEach(s => {
+        const grp = groupOrder.find(g => s.civics?.toUpperCase().includes(g));
+        if (grp) summary[grp]++;
+      });
 
       const resultDiv = document.getElementById("results");
       resultDiv.innerHTML = `
@@ -147,7 +151,7 @@
         <h3>Summary by Civics Group</h3>
         <table class="summary-table">
           <tr><th>Civics Group</th><th>Count</th></tr>
-          ${groupOrder.map(grp => summary[grp] ? `<tr><td>${grp}</td><td>${summary[grp]}</td></tr>` : "").join('')}
+          ${groupOrder.map(grp => `<tr><td>${grp}</td><td>${summary[grp]}</td></tr>`).join('')}
           <tr><th>Total</th><th>${output.length}</th></tr>
         </table>
       `;
