@@ -2,253 +2,203 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Student Subject Filter App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Subject Filter</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    h1 { font-size: 22px; }
-    h2 { margin-top: 20px; }
-    table { border-collapse: collapse; margin-top: 10px; width: 100%; }
-    table, th, td { border: 1px solid #ccc; padding: 5px; }
-    th { background: #f0f0f0; }
-    .checkbox-list { max-height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
-    .btn { margin: 5px; padding: 8px 12px; }
-    #results { margin-top: 20px; }
-    #indexList { white-space: pre; background: #f9f9f9; border: 1px solid #ccc; padding: 10px; margin-top: 10px; }
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    .subject-list, .level-filter { margin: 10px 0; }
+    .result-table, .summary-table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    .result-table th, .result-table td, .summary-table th, .summary-table td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    .result-table th, .summary-table th { background-color: #f2f2f2; }
+    .btn { margin: 10px 5px; padding: 10px; cursor: pointer; }
+    .index-output { white-space: pre; border: 1px solid #ccc; padding: 10px; margin-top: 10px; max-height: 200px; overflow-y: auto; }
   </style>
 </head>
 <body>
+  <h2>Student Subject Filter</h2>
+  <input type="file" id="fileInput" accept=".xlsx" />
+  <div class="level-filter">
+    <label for="levelSelect">Select Level:</label>
+    <select id="levelSelect"></select>
+  </div>
+  <div class="subject-list" id="subjectList"></div>
+  <button class="btn" onclick="filterStudents()">Filter Students</button>
+  <div id="results"></div>
+  <h3>Exam Index List</h3>
+  <div class="index-output" id="indexList"></div>
+  <button class="btn" onclick="copyIndexList()">Copy Index List</button>
+  <button class="btn" onclick="exportCSV()">Export Filtered Results CSV</button>
+  <button class="btn" onclick="exportExcel()">Export Filtered Results Excel</button>
 
-<h1>Student Subject Filter App</h1>
+  <script>
+    let workbook, students = [], subjectCols = [], civicsIndex = -1;
 
-<input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
-<div id="subjectList" class="checkbox-list"></div>
-<button id="filterBtn" class="btn">Filter Students</button>
+    const classCodes = {
+      'TEMPERANCE': 'TP', 'GENTLENESS': 'GT', 'FAITHFULNESS': 'FN', 'GOODNESS': 'GD',
+      'KINDNESS': 'KD', 'PATIENCE': 'PT', 'PEACE': 'PC', 'JOY': 'JY', 'LOVE': 'LV', 'DEVOTION': 'DV'
+    };
 
-<button id="copyBtn" class="btn">Copy Index Numbers</button>
-<button id="exportCSVBtn" class="btn">Export as CSV</button>
-<button id="exportExcelBtn" class="btn">Export as Excel</button>
+    const groupOrder = ["TEMPERANCE", "GENTLENESS", "FAITHFULNESS", "GOODNESS", "KINDNESS", "DEVOTION", "PATIENCE", "PEACE", "JOY"];
 
-<h2>Filtered Results</h2>
-<div id="results"></div>
+    document.getElementById('fileInput').addEventListener('change', handleFile);
 
-<h2>Exam Index Numbers</h2>
-<pre id="indexList"></pre>
-
-
-<h2>Check Student Subjects</h2>
-<input type="text" id="indexInput" placeholder="Enter Exam Index (e.g., GD23)" />
-<button id="checkBtn" class="btn">Check Subjects</button>
-<div id="checkResults"></div>
-
-<script>
-let students = [];
-let allSubjects = [];
-
-const classPrefixes = {
-  "TEMPERANCE": "TP", "GENTLENESS": "GT", "FAITHFULNESS": "FN",
-  "GOODNESS": "GD", "KINDNESS": "KD", "PATIENCE": "PT",
-  "PEACE": "PC", "JOY": "JY", "LOVE": "LV", "DEVOTION": "DV"
-};
-
-document.getElementById("fileInput").addEventListener("change", handleFile, false);
-
-function handleFile(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    const data = evt.target.result;
-    const workbook = XLSX.read(data, { type: "binary" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-
-    // Find header row
-    const headerRowIndex = json.findIndex(row =>
-      Object.values(row).includes("S/N") &&
-      Object.values(row).includes("Name") &&
-      Object.values(row).includes("Civics Group")
-    );
-    if (headerRowIndex === -1) {
-      alert("Could not find table headers (S/N, Name, Civics Group)");
-      return;
+    function handleFile(e) {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        workbook = XLSX.read(e.target.result, { type: 'binary' });
+        populateSheetAndSubjects();
+      };
+      reader.readAsBinaryString(e.target.files[0]);
     }
 
-    const headers = Object.values(json[headerRowIndex]);
-    const snIndex = headers.indexOf("S/N");
-    const nameIndex = headers.indexOf("Name");
-    const civicsIndex = headers.indexOf("Civics Group");
+    function populateSheetAndSubjects() {
+      let allSubjects = new Set();
+      let levels = new Set();
 
-    students = [];
-    for (let i = headerRowIndex + 1; i < json.length; i++) {
-      const row = Object.values(json[i]);
-      if (!row[snIndex] || !row[nameIndex] || !row[civicsIndex]) continue;
+      students = [];
 
-      const civics = row[civicsIndex];
-      const sn = parseInt(row[snIndex]);
-      const name = row[nameIndex];
-      const subjects = row.slice(civicsIndex + 1).filter(v => v && v !== "-");
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-      students.push({ sn, name, civics, subjects });
+        const headers = json[9]; // Row 10 is the actual header
+        civicsIndex = headers.indexOf("Civics Group");
+        const levelIndex = headers.indexOf("Level");
+
+        if (civicsIndex === -1 || levelIndex === -1) return;
+
+        subjectCols = headers.slice(civicsIndex + 1).map((_, i) => civicsIndex + 1 + i);
+
+        for (let i = 10; i < json.length; i++) {
+          const row = json[i];
+          const subjectEntries = subjectCols.map(index => row[index] || '').map(s => s.toString().trim()).filter(s => s && s !== '-');
+          subjectEntries.forEach(s => {
+            if (!/^\d{5}$/.test(s)) allSubjects.add(s); // exclude 5-digit numeric subject codes
+          });
+          if (row.length > 0) levels.add(row[levelIndex]);
+          students.push({
+            sn: row[0],
+            name: row[1],
+            level: row[levelIndex],
+            civics: row[civicsIndex],
+            subjects: subjectEntries
+          });
+        }
+      });
+
+      const subjectList = document.getElementById("subjectList");
+      subjectList.innerHTML = "<strong>Select Subjects:</strong><br>";
+      [...allSubjects].sort().forEach(sub => {
+        subjectList.innerHTML += `<label><input type="checkbox" value="${sub}" /> ${sub}</label><br>`;
+      });
+
+      const levelSelect = document.getElementById("levelSelect");
+      levelSelect.innerHTML = "<option value='all'>All</option>";
+      [...levels].sort().forEach(level => {
+        levelSelect.innerHTML += `<option value="${level}">${level}</option>`;
+      });
     }
 
-    // Build subject list (exclude 5-digit numeric codes)
-    const subjectSet = new Set();
-    students.forEach(s => s.subjects.forEach(sub => {
-      if (!/^\d{5}$/.test(sub)) {
-        subjectSet.add(sub);
-      }
-    }));
-    allSubjects = Array.from(subjectSet).sort();
-
-    const subjectListDiv = document.getElementById("subjectList");
-    subjectListDiv.innerHTML = "";
-    allSubjects.forEach(sub => {
-      const label = document.createElement("label");
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.value = sub;
-      label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(" " + sub));
-      subjectListDiv.appendChild(label);
-      subjectListDiv.appendChild(document.createElement("br"));
-    });
-  };
-  reader.readAsBinaryString(file);
-}
-
-function getExamIndex(civics, sn) {
-  let prefix = "XX";
-  for (let key in classPrefixes) {
-    if (civics.toUpperCase().includes(key)) {
-      prefix = classPrefixes[key];
-      break;
+    function generateIndex(civics, sn) {
+      const code = Object.entries(classCodes).find(([k]) => civics.toUpperCase().includes(k))?.[1] || "XX";
+      return code + ("0" + sn).slice(-2);
     }
-  }
-  return prefix + String(sn).padStart(2, "0");
-}
 
-document.getElementById("filterBtn").addEventListener("click", () => {
-  const selectedSubjects = Array.from(document.querySelectorAll("#subjectList input:checked")).map(cb => cb.value);
-  if (selectedSubjects.length === 0) {
-    alert("Please select at least one subject");
-    return;
-  }
+    function sanitizeFilename(str) {
+      return str.replace(/\s+/g, "_");
+    }
 
-  const filtered = students.filter(s => s.subjects.some(sub => selectedSubjects.includes(sub)));
-  const resultsDiv = document.getElementById("results");
-  resultsDiv.innerHTML = "";
+    function filterStudents() {
+      const selectedSubjects = Array.from(document.querySelectorAll("input[type='checkbox']:checked")).map(cb => cb.value);
+      const selectedLevel = document.getElementById("levelSelect").value;
 
-  // Table
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>Name</th><th>Civics Group</th><th>Exam Index</th></tr>";
-  table.appendChild(thead);
+      let filtered = students.filter(s =>
+        (selectedLevel === "all" || s.level === selectedLevel) &&
+        selectedSubjects.some(sub => s.subjects.includes(sub))
+      );
 
-  const tbody = document.createElement("tbody");
-  filtered.forEach(s => {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td>${s.name}</td><td>${s.civics}</td><td>${getExamIndex(s.civics, s.sn)}</td>`;
-    tbody.appendChild(row);
-  });
-  table.appendChild(tbody);
-  resultsDiv.appendChild(table);
+      // Sort filtered by civics group order
+      filtered.sort((a, b) => {
+        const aIndex = groupOrder.findIndex(g => a.civics.toUpperCase().includes(g));
+        const bIndex = groupOrder.findIndex(g => b.civics.toUpperCase().includes(g));
+        return aIndex - bIndex;
+      });
 
-  // Group counts
-  const groupCounts = {};
-  filtered.forEach(s => {
-    groupCounts[s.civics] = (groupCounts[s.civics] || 0) + 1;
-  });
+      const output = filtered.map((s, i) => ({
+        sn: s.sn,
+        name: s.name,
+        civics: s.civics,
+        index: generateIndex(s.civics, s.sn)
+      }));
 
-  const summary = document.createElement("div");
-  summary.innerHTML = "<h3>Civics Group Counts</h3>";
-  const ul = document.createElement("ul");
-  for (let g in groupCounts) {
-    const li = document.createElement("li");
-    li.textContent = `${g}: ${groupCounts[g]}`;
-    ul.appendChild(li);
-  }
-  const total = document.createElement("p");
-  total.innerHTML = "<b>Total Students: " + filtered.length + "</b>";
-  summary.appendChild(ul);
-  summary.appendChild(total);
-  resultsDiv.appendChild(summary);
+      // Group counts in fixed order
+      const summary = {};
+      output.forEach(s => summary[s.civics] = (summary[s.civics] || 0) + 1);
 
-  // Index list
-  const indexList = filtered.map(s => getExamIndex(s.civics, s.sn)).join("\n");
-  document.getElementById("indexList").textContent = indexList;
+      const resultDiv = document.getElementById("results");
+      resultDiv.innerHTML = `
+        <h3>Filtered Students</h3>
+        <table class="result-table">
+          <tr><th>S/N</th><th>Name</th><th>Civics Group</th><th>Exam Index</th></tr>
+          ${output.map(s => `<tr><td>${s.sn}</td><td>${s.name}</td><td>${s.civics}</td><td>${s.index}</td></tr>`).join('')}
+        </table>
 
-  // Store for export
-  window.filteredResults = filtered;
-  window.selectedSubjects = selectedSubjects;
-});
+        <h3>Summary by Civics Group</h3>
+        <table class="summary-table">
+          <tr><th>Civics Group</th><th>Count</th></tr>
+          ${groupOrder.map(grp => summary[grp] ? `<tr><td>${grp}</td><td>${summary[grp]}</td></tr>` : "").join('')}
+          <tr><th>Total</th><th>${output.length}</th></tr>
+        </table>
+      `;
 
-document.getElementById("copyBtn").addEventListener("click", () => {
-  const text = document.getElementById("indexList").textContent;
-  navigator.clipboard.writeText(text);
-  alert("Copied to clipboard!");
-});
+      document.getElementById("indexList").textContent = output.map(s => s.index).join("\n");
+    }
 
-function sanitizeFilename(subjects, civics) {
-  const x = parseInt(civics);
-  const y = subjects.map(s => s.replace(/\s+/g, "_")).join("_");
-  return `S${x}_${y}`;
-}
+    function copyIndexList() {
+      const el = document.getElementById("indexList");
+      navigator.clipboard.writeText(el.textContent);
+      alert("Index list copied to clipboard!");
+    }
 
-document.getElementById("exportCSVBtn").addEventListener("click", () => {
-  if (!window.filteredResults) return;
-  const civicsNum = window.filteredResults[0].civics.match(/^\d+/);
-  const filename = sanitizeFilename(window.selectedSubjects, civicsNum ? civicsNum[0] : "X");
+    function buildFilename(extension) {
+      const selectedSubjects = Array.from(document.querySelectorAll("input[type='checkbox']:checked")).map(cb => sanitizeFilename(cb.value));
+      const civicsGroup = document.querySelector(".result-table tr:nth-child(2) td:nth-child(3)")?.textContent || "Group";
+      const civicsNumber = parseInt(civicsGroup) || "";
+      const subjectsPart = selectedSubjects.join("_") || "Subjects";
+      return `S${civicsNumber}_${subjectsPart}.${extension}`;
+    }
 
-  const rows = [["Name", "Civics Group", "Exam Index"]];
-  window.filteredResults.forEach(s => {
-    rows.push([s.name, s.civics, getExamIndex(s.civics, s.sn)]);
-  });
+    function exportCSV() {
+      const rows = [["S/N", "Name", "Civics Group", "Exam Index"]];
+      const data = document.querySelectorAll(".result-table tr");
+      data.forEach((row, i) => {
+        if (i === 0) return; // skip header
+        const cols = Array.from(row.querySelectorAll("td")).map(td => td.textContent);
+        rows.push(cols);
+      });
+      const csvContent = "data:text/csv;charset=utf-8," + rows.map(r => r.join(",")).join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", buildFilename("csv"));
+      document.body.appendChild(link);
+      link.click();
+    }
 
-  let csvContent = rows.map(e => e.join(",")).join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = filename + ".csv";
-  link.click();
-});
-
-document.getElementById("exportExcelBtn").addEventListener("click", () => {
-  if (!window.filteredResults) return;
-  const civicsNum = window.filteredResults[0].civics.match(/^\d+/);
-  const filename = sanitizeFilename(window.selectedSubjects, civicsNum ? civicsNum[0] : "X");
-
-  const ws_data = [["Name", "Civics Group", "Exam Index"]];
-  window.filteredResults.forEach(s => {
-    ws_data.push([s.name, s.civics, getExamIndex(s.civics, s.sn)]);
-  });
-  const ws = XLSX.utils.aoa_to_sheet(ws_data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Filtered Results");
-  XLSX.writeFile(wb, filename + ".xlsx");
-});
-
-document.getElementById("checkBtn").addEventListener("click", () => {
-  const input = document.getElementById("indexInput").value.trim().toUpperCase();
-  const resultDiv = document.getElementById("checkResults");
-  resultDiv.innerHTML = "";
-
-  const match = students.find(s => getExamIndex(s.civics, s.sn).toUpperCase() === input);
-  if (!match) {
-    resultDiv.textContent = "No student found for index " + input;
-    return;
-  }
-
-  const enrolled = match.subjects;
-  const notEnrolled = allSubjects.filter(sub => !enrolled.includes(sub));
-
-  let html = `<h3>${match.name} (${match.civics}) - ${input}</h3>`;
-  html += "<p><b>Enrolled Subjects:</b> " + enrolled.join(", ") + "</p>";
-  html += "<p><b>Not Enrolled:</b> " + notEnrolled.join(", ") + "</p>";
-  resultDiv.innerHTML = html;
-});
-</script>
-
+    function exportExcel() {
+      const wb = XLSX.utils.book_new();
+      const ws_data = [["S/N", "Name", "Civics Group", "Exam Index"]];
+      const data = document.querySelectorAll(".result-table tr");
+      data.forEach((row, i) => {
+        if (i === 0) return;
+        const cols = Array.from(row.querySelectorAll("td")).map(td => td.textContent);
+        ws_data.push(cols);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+      XLSX.utils.book_append_sheet(wb, ws, "Filtered Results");
+      XLSX.writeFile(wb, buildFilename("xlsx"));
+    }
+  </script>
 </body>
 </html>
